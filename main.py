@@ -1,6 +1,9 @@
 import discord
 import random
 import datetime
+import os
+import json
+from dotenv import load_dotenv
 from discord.ext import commands, tasks
 
 
@@ -13,6 +16,8 @@ intents.guilds = True
 intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+config_file = "data.json"
 
 allcountries = {
     "Africa": [
@@ -61,7 +66,7 @@ allcountries = {
     ]
 }
 
-def get_country():
+def get_cont():
     day = datetime.datetime.today().weekday()
     if day == 0:
         return "Africa"
@@ -78,36 +83,105 @@ def get_country():
     if day == 6:
         return "Antarctica"
     
-continent = get_country()
+continent = get_cont()
+
+def load_config():
+    if os.path.exists(config_file):
+        with open(config_file, "r") as f:
+            return json.load(f)
+    else:
+        return {}
+
+def save_config(config):
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=4)
 
 
 @tasks.loop(seconds=60)
 async def main():
     now = datetime.datetime.now()
-    if now.hour == 6 and now.minute == 0:
-        countries = random.sample(allcountries[continent], 3)
-        countries.sort()
+    config = load_config()
 
-        for guild in bot.guilds:
-            for ctg in guild.categories:
-                if ctg.name == 'Countries':
-                    for vc in guild.voice_channels:
-                        if vc.category == ctg:
-                            await vc.delete()
-                    await ctg.delete()
+    for guild in bot.guilds:
+        guild_id = str(guild.id)
 
-        category = await guild.create_category('Countries')
-        for c in countries:
-            await guild.create_voice_channel(name= c, category=category, bitrate=64000)
-        if guild.system_channel:
-            await guild.system_channel.send('3 random channels were created today')
+        if guild_id in config:
+            hour = config[guild_id]["hour"]
+            minute = config[guild_id]["minute"]
+
+            if now.hour == hour and now.minute == minute:
+                countries = random.sample(allcountries[continent], 3)
+                countries.sort()
+
+                for ctg in guild.categories:
+                    if ctg.name == 'Countries':
+                        for vc in guild.voice_channels:
+                            if vc.category == ctg:
+                                await vc.delete()
+                        await ctg.delete()
+
+                category = await guild.create_category('Countries')
+                for c in countries:
+                    await guild.create_voice_channel(name= c, category=category, bitrate=64000)
+
+                if guild.system_channel:
+                    await guild.system_channel.send('3 random channels were created today')
 
 @bot.event
 async def on_ready():
+    config = load_config()
+
     for guild in bot.guilds:
-        print(guild.name, guild.id)
+        guild_id = str(guild.id)
+        if guild_id not in config:
+            config[guild_id] = {
+                "hour": 6,
+                "minute": 0
+            }
+
+    save_config(config)
     print('bot is online!')
+    print('settings updated with server')
+    print(config)
+
     main.start()
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def settime(ctx, hour:int, minute: int):
+    if not (0 <= hour <= 23) or not (0 <= minute <= 59):
+        await ctx.send(f'Please set the time right! Hour must be between 0-23 and minute 0-59')
+        return
+    config = load_config()
+    guild_id = str(ctx.guild.id)
 
-bot.run('MTM3NTY1NDYwMzAyMjAwODUwMQ.Gun621.NcW6JIAStzV_OEU2aA88tagRx1mNboEOy_oM_c')
+    if guild_id not in config:
+        config[guild_id] = {}
+
+    config[guild_id]["hour"] = hour
+    config[guild_id]["minute"] = minute
+
+    save_config(config)
+
+    await ctx.send(f'⏰ Your server reset time was updated to {hour:02d}:{minute:02d} in this server!')
+        
+
+@bot.command()
+async def showtime(ctx):
+    config = load_config()
+    guild_id = str(ctx.guild.id)
+
+    if guild_id in config:
+        hour = config[guild_id]["hour"]
+        minute = config[guild_id]["minute"]
+
+        await ctx.send(f"The time set in this server is {hour:02d}:{minute:02d}!")
+    
+    else:
+        await ctx.send("Your doesn't have a time set yet!")
+
+
+load_dotenv()
+
+token=os.getenv("DCTOKEN")
+bot.run(token)
